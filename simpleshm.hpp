@@ -28,44 +28,53 @@ class SharedObject
 {
     static inline constexpr std::size_t SIZE = sizeof(internal::OptionalSharedObject<T>);
 public:
-    SharedObject(std::string_view id, bool owner)
-    : owner_{owner},
-      id_{id},
-      shm_file_descriptor_{shm_open(id.data(), O_RDWR | (owner ? O_CREAT | O_EXCL : 0), S_IRUSR | S_IWUSR)},
-      semaphore_{sem_open(id.data(), O_RDWR | (owner ? O_CREAT | O_EXCL : 0), S_IRUSR | S_IWUSR, 1)}
+    SharedObject(std::string_view id)
+    : id_{id}
     {
-        if(shm_file_descriptor_ < 0) {
-            throw std::runtime_error(std::string{"Cannot create shared memory file descriptor with id "}
-                .append(id).append(": ").append(strerror(errno)));
+        // try creating shared memory segment
+        shm_file_descriptor_ = shm_open(id.data(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+        if(shm_file_descriptor_ < 0) { // we could not create the memory segment
+            if( errno == 17) { // File exists: we try opening the memory segment again, without creating
+                // if the segment is deleted in the meantime, bad luck, but probably unintended behavior
+                shm_file_descriptor_ = shm_open(id.data(), O_RDWR, S_IRUSR | S_IWUSR);
+                if(shm_file_descriptor_ < 0) {
+                    throwError("Cannot open shared memory");
+                }
+                owner_ = false; // we do not own this shared object
+            }
+            else {
+                throwError("Cannot open shared memory");
+            }
+        }
+        else {
+            owner_ = true; // we created the segment, we are the owners of this shared object
         }
 
         if(ftruncate(shm_file_descriptor_, SIZE) < 0) {
-            if(owner) {
+            if(owner_) {
                 shm_unlink(id.data());
             }
-            throw std::runtime_error(std::string{"Cannot resize shared memory with id "}
-                .append(id).append(": ").append(strerror(errno)));
+            throwError("Cannot resize shared memory");
         }
 
         shared_object_ = reinterpret_cast<internal::OptionalSharedObject<T>*>(
             mmap(nullptr, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_file_descriptor_, 0));
         if(shared_object_ == MAP_FAILED) {
-            if(owner) {
+            if(owner_) {
                 shm_unlink(id.data());
             }
-            throw std::runtime_error(std::string{"Cannot map shared memory with id "}
-                .append(id).append(": ").append(strerror(errno)));
+            throwError("Cannot map shared memory");
         }
 
+        semaphore_ = sem_open(id.data(), O_RDWR | (owner_ ? O_CREAT | O_EXCL : 0), S_IRUSR | S_IWUSR, 1);
         if(semaphore_ == SEM_FAILED) {
-            if(owner) {
+            if(owner_) {
                 shm_unlink(id.data());
             }
-            throw std::runtime_error(std::string{"Cannot create semaphore with id "}
-                .append(id).append(": ").append(strerror(errno)));
+            throwError("Cannot create semaphore");
         }
 
-        if(owner) {
+        if(owner_) {
             new (shared_object_) internal::OptionalSharedObject<T>();
         }
     }
@@ -94,11 +103,16 @@ public:
     }
 
 private:
-    const bool owner_;
-    const std::string id_;
+    bool owner_;
+    std::string id_;
     int shm_file_descriptor_;
     sem_t* semaphore_;
     internal::OptionalSharedObject<T>* shared_object_;
+
+    void throwError(std::string_view error) {
+        throw std::runtime_error(std::string{error}.append(" with id {")
+            .append(id_).append("}: ").append(strerror(errno)));
+    }
 };
 
 
