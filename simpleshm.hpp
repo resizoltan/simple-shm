@@ -35,6 +35,7 @@ public:
         shm_file_descriptor_ = shm_open(id.data(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
         if(shm_file_descriptor_ < 0) { // we could not create the memory segment
             if( errno == 17) { // File exists: we try opening the memory segment again, without creating
+                errno = 0;
                 // if the segment is deleted in the meantime, bad luck, but probably unintended behavior
                 shm_file_descriptor_ = shm_open(id.data(), O_RDWR, S_IRUSR | S_IWUSR);
                 if(shm_file_descriptor_ < 0) {
