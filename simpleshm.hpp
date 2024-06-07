@@ -66,10 +66,8 @@ public:
             owner_ = true; // we created the segment, we are the owners of this shared object
         }
 
-        if(ftruncate(shm_file_descriptor_, SIZE) < 0) {
-            if(owner_) {
-                shm_unlink(id.data());
-            }
+        if(owner_ && ftruncate(shm_file_descriptor_, SIZE) < 0) {
+            shm_unlink(id.data());
             throwError("Cannot resize shared memory");
         }
 
@@ -82,10 +80,16 @@ public:
             throwError("Cannot map shared memory");
         }
 
-        semaphore_ = sem_open(id.data(), O_RDWR | (owner_ ? O_CREAT | O_EXCL : 0), S_IRUSR | S_IWUSR, 1);
+        if(!owner_) {
+            // if multiple references to the shared object are created at the same time
+            // non-owners wait a bit to make "sure" the owner finished setup
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        semaphore_ = sem_open(id_.c_str(), O_RDWR | (owner_ ? O_CREAT | O_EXCL : 0), S_IRUSR | S_IWUSR, 1);
         if(semaphore_ == SEM_FAILED) {
             if(owner_) {
-                shm_unlink(id.data());
+                shm_unlink(id_.c_str());
             }
             throwError("Cannot create semaphore");
         }
