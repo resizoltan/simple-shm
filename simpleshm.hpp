@@ -105,12 +105,12 @@ public:
     }
 
     void set(const T& value) {
-        internal::SemGuard (semaphore_);
+        internal::SemGuard{semaphore_};
         shared_object_->emplace(value);
     }
 
     T get() const {
-        internal::SemGuard (semaphore_);
+        internal::SemGuard{semaphore_};
         // throws std::bad_optional_access if value has never been set
         return shared_object_->value();
     }
