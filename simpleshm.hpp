@@ -21,6 +21,21 @@ namespace internal
 template <typename T>
 using OptionalSharedObject = std::optional<T>;
 
+class SemGuard {
+public:
+    inline SemGuard(sem_t* semaphore)
+    : semaphore_{semaphore}
+    {
+        sem_wait(semaphore_);
+    };
+
+    inline ~SemGuard() {
+        sem_post(semaphore_);
+    }
+private:
+    sem_t* semaphore_;
+};
+
 }
 
 template <typename T>
@@ -90,15 +105,12 @@ public:
     }
 
     void set(const T& value) {
+        internal::SemGuard (semaphore_);
         shared_object_->emplace(value);
     }
 
-    T& get() {
-        // throws std::bad_optional_access if value has never been set
-        return shared_object_->value();
-    }
-
-    const T& get() const {
+    T get() const {
+        internal::SemGuard (semaphore_);
         // throws std::bad_optional_access if value has never been set
         return shared_object_->value();
     }
