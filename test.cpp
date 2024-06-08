@@ -74,7 +74,7 @@ TEST_CASE("Shared Objects can be accessed from multiple processes") {
         errno = 0;
         shared_bool.reset();
         REQUIRE (errno == 0);
-        return;
+        exit(EXIT_SUCCESS);
     default:
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         shared_bool = std::make_unique<SharedObject<bool>>("test_simpleshm_bool_multi_process");
@@ -85,4 +85,22 @@ TEST_CASE("Shared Objects can be accessed from multiple processes") {
         REQUIRE (errno == 0);
         break;
     }
+}
+
+TEST_CASE("Shared Objects are thread safe in a single process") {
+    SharedObject<int> shared_int{"test_simpleshm_thread_safety_single_process"};
+    shared_int.set(0);
+    const int n = 1'000'000;
+    auto fun = [&](){
+        SharedObject<int> shared_int{"test_simpleshm_thread_safety_single_process"};
+        for(int i = 0; i < n; i++) {
+            std::lock_guard<std::mutex> lock{shared_int.mutex()};
+            shared_int.set(shared_int.get() + 1);
+        }
+    };
+    std::thread t1{fun};
+    std::thread t2{fun};
+    t1.join();
+    t2.join();
+    REQUIRE ( shared_int.get() == 2*n);
 }
