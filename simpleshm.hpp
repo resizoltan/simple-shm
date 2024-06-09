@@ -24,7 +24,7 @@ template <typename T>
 struct OptionalSharedObject
 {
     std::optional<T> data;
-    std::mutex mutex;
+    std::recursive_mutex mutex;
 };
 
 }
@@ -56,15 +56,17 @@ public:
     }
 
     void set(const T& value) {
+        auto lock = std::lock_guard{shared_object_->mutex};
         shared_object_->data.emplace(value);
     }
 
+    // throws std::bad_optional_access if value has never been set
     T get() const {
-        // throws std::bad_optional_access if value has never been set
+        auto lock = std::lock_guard{shared_object_->mutex};
         return shared_object_->data.value();
     }
 
-    std::mutex& mutex() {
+    std::recursive_mutex& mutex() {
         return shared_object_->mutex;
     }
 
@@ -107,9 +109,13 @@ private:
 
         new (shared_object_) internal::OptionalSharedObject<T>();
 
+        // this is potentially dangerous, but it seems to work:
+        // std::mutex cannot be used between processes by default
+        // so we re-init the underlying posix mutex with the right attributes
         pthread_mutexattr_t attr;
         pthread_mutexattr_init(&attr);
         pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
         pthread_mutex_destroy(shared_object_->mutex.native_handle());
         pthread_mutex_init(shared_object_->mutex.native_handle(), &attr);
 
