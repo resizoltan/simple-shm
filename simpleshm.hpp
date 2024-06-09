@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <semaphore.h>
+#include <time.h>
 
 #include <string_view>
 #include <stdexcept>
@@ -24,22 +25,6 @@ struct OptionalSharedObject
 {
     std::optional<T> data;
     std::mutex mutex;
-};
-
-
-class SemGuard {
-public:
-    inline SemGuard(sem_t* semaphore)
-    : semaphore_{semaphore}
-    {
-        sem_wait(semaphore_);
-    };
-
-    inline ~SemGuard() {
-        sem_post(semaphore_);
-    }
-private:
-    sem_t* semaphore_;
 };
 
 }
@@ -62,8 +47,11 @@ public:
         munmap(shared_object_, SIZE);
         close(shm_file_descriptor_);
         if(owner_) {
+            // we acquire the semaphore so we know that noone is currently initializing
+            sem_wait(semaphore_);
             shm_unlink(id_.data());
             sem_unlink(id_.data());
+            sem_post(semaphore_);
         }
     }
 
@@ -97,12 +85,14 @@ private:
         shm_file_descriptor_ = shm_open(id_.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
         if(shm_file_descriptor_ < 0) { // we could not create the memory segment
             sem_unlink(id_.c_str());
+            sem_post(semaphore_);
             throwError("Cannot create shared memory");
         }
 
         if(ftruncate(shm_file_descriptor_, SIZE) < 0) {
             shm_unlink(id_.c_str());
             sem_unlink(id_.c_str());
+            sem_post(semaphore_);
             throwError("Cannot resize shared memory");
         }
 
@@ -111,6 +101,7 @@ private:
         if(shared_object_ == MAP_FAILED) {
             shm_unlink(id_.c_str());
             sem_unlink(id_.c_str());
+            sem_post(semaphore_);
             throwError("Cannot map shared memory");
         }
 
@@ -131,10 +122,12 @@ private:
         if(semaphore_ == SEM_FAILED) {
             throwError("Cannot create semaphore");
         }
-        {
-            internal::SemGuard{semaphore_};
-            shm_file_descriptor_ = shm_open(id_.c_str(), O_RDWR, S_IRUSR | S_IWUSR);
-        }
+
+        // we wait until the owner finishes initialization
+        sem_wait(semaphore_);
+        // we block the semaphore so the owner cannot destruct while we are opening
+        shm_file_descriptor_ = shm_open(id_.c_str(), O_RDWR, S_IRUSR | S_IWUSR);
+        sem_post(semaphore_);
 
         if(shm_file_descriptor_ < 0) { // we could not open the memory segment
             throwError("Cannot open shared memory");
