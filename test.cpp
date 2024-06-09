@@ -94,9 +94,8 @@ TEST_CASE ("PTHREAD_PROCESS_SHARED") {
     auto fun = [](){
         SharedObject<int> shared_int2{"simpleshm_pthread_process_shared"};
         for(int i = 0; i < n; i++) {
-            pthread_mutex_lock(shared_int2.mutex());
+            std::lock_guard<std::mutex> lock{shared_int2.mutex()};
             shared_int2.set(shared_int2.get() + 1);
-            pthread_mutex_unlock(shared_int2.mutex());
         }
     };
     std::thread t1{fun};

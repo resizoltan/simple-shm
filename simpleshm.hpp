@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <optional>
+#include <mutex>
 
 namespace simpleshm
 {
@@ -22,7 +23,7 @@ template <typename T>
 struct OptionalSharedObject
 {
     std::optional<T> data;
-    pthread_mutex_t mutex;
+    std::mutex mutex;
 };
 
 
@@ -75,8 +76,8 @@ public:
         return shared_object_->data.value();
     }
 
-    auto mutex() {
-        return &shared_object_->mutex;
+    std::mutex& mutex() {
+        return shared_object_->mutex;
     }
 
 private:
@@ -118,7 +119,8 @@ private:
         pthread_mutexattr_t attr;
         pthread_mutexattr_init(&attr);
         pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
-        pthread_mutex_init(&shared_object_->mutex, &attr);
+        pthread_mutex_destroy(shared_object_->mutex.native_handle());
+        pthread_mutex_init(shared_object_->mutex.native_handle(), &attr);
 
         sem_post(semaphore_);
         return true;
