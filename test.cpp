@@ -56,33 +56,20 @@ TEST_CASE("Shared Objects can be accessed from multiple threads") {
     REQUIRE (errno == 0);
 }
 
-TEST_CASE("Shared Objects can be accessed from multiple processes") {
-    std::unique_ptr<SharedObject<bool>> shared_bool;
-
-    pid_t pid = fork();
-    switch (pid)
-    {
-    case -1:
-        perror("fork");
-        exit(EXIT_FAILURE);
-    case 0:
-        errno = 0;
-        shared_bool = std::make_unique<SharedObject<bool>>("test_simpleshm_bool_multi_process");
-        shared_bool->set(true);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        REQUIRE (shared_bool->get() == false);
-        errno = 0;
-        shared_bool.reset();
-        REQUIRE (errno == 0);
-        return;
-    default:
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        shared_bool = std::make_unique<SharedObject<bool>>("test_simpleshm_bool_multi_process");
-        REQUIRE (shared_bool->get() == true);
-        shared_bool->set(false);
-        errno = 0;
-        shared_bool.reset();
-        REQUIRE (errno == 0);
-        break;
-    }
+TEST_CASE ("Access of shared objects is thread-safe") {
+    SharedObject<int> shared_int{"simpleshm_pthread_process_shared"};
+    shared_int.set(0);
+    const int n = 1'000'000;
+    auto fun = [](){
+        SharedObject<int> shared_int2{"simpleshm_pthread_process_shared"};
+        for(int i = 0; i < n; i++) {
+            auto lock = std::lock_guard{shared_int2.mutex()};
+            shared_int2.set(shared_int2.get() + 1);
+        }
+    };
+    std::thread t1{fun};
+    std::thread t2{fun};
+    t1.join();
+    t2.join();
+    REQUIRE ( shared_int.get() == 2*n);
 }
