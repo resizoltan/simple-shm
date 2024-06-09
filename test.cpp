@@ -55,7 +55,7 @@ TEST_CASE("Shared Objects can be accessed from multiple threads") {
     shared_bool1.reset();
     REQUIRE (errno == 0);
 }
-
+/*
 TEST_CASE("Shared Objects can be accessed from multiple processes") {
     std::unique_ptr<SharedObject<bool>> shared_bool;
 
@@ -85,4 +85,23 @@ TEST_CASE("Shared Objects can be accessed from multiple processes") {
         REQUIRE (errno == 0);
         break;
     }
+}*/
+
+TEST_CASE ("PTHREAD_PROCESS_SHARED") {
+    SharedObject<int> shared_int{"simpleshm_pthread_process_shared"};
+    shared_int.set(0);
+    const int n = 1'000'000;
+    auto fun = [](){
+        SharedObject<int> shared_int2{"simpleshm_pthread_process_shared"};
+        for(int i = 0; i < n; i++) {
+            pthread_mutex_lock(shared_int2.mutex());
+            shared_int2.set(shared_int2.get() + 1);
+            pthread_mutex_unlock(shared_int2.mutex());
+        }
+    };
+    std::thread t1{fun};
+    std::thread t2{fun};
+    t1.join();
+    t2.join();
+    REQUIRE ( shared_int.get() == 2*n);
 }

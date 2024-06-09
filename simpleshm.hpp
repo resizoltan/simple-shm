@@ -19,7 +19,12 @@ namespace simpleshm
 namespace internal
 {
 template <typename T>
-using OptionalSharedObject = std::optional<T>;
+struct OptionalSharedObject
+{
+    std::optional<T> data;
+    pthread_mutex_t mutex;
+};
+
 
 class SemGuard {
 public:
@@ -62,14 +67,16 @@ public:
     }
 
     void set(const T& value) {
-        internal::SemGuard{semaphore_};
-        shared_object_->emplace(value);
+        shared_object_->data.emplace(value);
     }
 
     T get() const {
-        internal::SemGuard{semaphore_};
         // throws std::bad_optional_access if value has never been set
-        return shared_object_->value();
+        return shared_object_->data.value();
+    }
+
+    auto mutex() {
+        return &shared_object_->mutex;
     }
 
 private:
@@ -107,6 +114,11 @@ private:
         }
 
         new (shared_object_) internal::OptionalSharedObject<T>();
+
+        pthread_mutexattr_t attr;
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+        pthread_mutex_init(&shared_object_->mutex, &attr);
 
         sem_post(semaphore_);
         return true;
