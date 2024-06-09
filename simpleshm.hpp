@@ -51,7 +51,6 @@ public:
             sem_wait(semaphore_);
             shm_unlink(id_.data());
             sem_unlink(id_.data());
-            sem_post(semaphore_);
         }
     }
 
@@ -129,8 +128,13 @@ private:
             throwError("Cannot create semaphore");
         }
 
-        // we wait until the owner finishes initialization
-        sem_wait(semaphore_);
+        // we wait max 10 ms for the owner to finish initialization
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_nsec += 10'000'000;
+        if(sem_timedwait(semaphore_, &ts)) {
+            throwError("Could not acquire semaphore");
+        }
         // we block the semaphore so the owner cannot destruct while we are opening
         shm_file_descriptor_ = shm_open(id_.c_str(), O_RDWR, S_IRUSR | S_IWUSR);
         sem_post(semaphore_);
