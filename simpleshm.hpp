@@ -12,7 +12,6 @@
 #include <stdexcept>
 #include <type_traits>
 #include <optional>
-#include <mutex>
 
 namespace simpleshm
 {
@@ -20,10 +19,21 @@ namespace simpleshm
 namespace internal
 {
 template <typename T>
-struct OptionalSharedObject
-{
-    std::optional<T> data;
-    std::mutex mutex;
+using OptionalSharedObject = std::optional<T>;
+
+class SemGuard {
+public:
+    inline SemGuard(sem_t* semaphore)
+    : semaphore_{semaphore}
+    {
+        sem_wait(semaphore_);
+    };
+
+    inline ~SemGuard() {
+        sem_post(semaphore_);
+    }
+private:
+    sem_t* semaphore_;
 };
 
 }
@@ -52,18 +62,14 @@ public:
     }
 
     void set(const T& value) {
-        //std::lock_guard lock{shared_object_->mutex};
-        shared_object_->data.emplace(value);
+        internal::SemGuard{semaphore_};
+        shared_object_->emplace(value);
     }
 
     T get() const {
-        //std::lock_guard lock{shared_object_->mutex};
+        internal::SemGuard{semaphore_};
         // throws std::bad_optional_access if value has never been set
-        return shared_object_->data.value();
-    }
-
-    std::mutex& mutex() {
-        return shared_object_->mutex;
+        return shared_object_->value();
     }
 
 private:
@@ -101,10 +107,6 @@ private:
         }
 
         new (shared_object_) internal::OptionalSharedObject<T>();
-        pthread_mutexattr_t attr;
-        pthread_mutexattr_init(&attr);
-        pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
-        pthread_mutex_init(shared_object_->mutex.native_handle(), &attr);
 
         sem_post(semaphore_);
         return true;
@@ -115,10 +117,11 @@ private:
         if(semaphore_ == SEM_FAILED) {
             throwError("Cannot create semaphore");
         }
+        {
+            internal::SemGuard{semaphore_};
+            shm_file_descriptor_ = shm_open(id_.c_str(), O_RDWR, S_IRUSR | S_IWUSR);
+        }
 
-        sem_wait(semaphore_);
-        sem_post(semaphore_);
-        shm_file_descriptor_ = shm_open(id_.c_str(), O_RDWR, S_IRUSR | S_IWUSR);
         if(shm_file_descriptor_ < 0) { // we could not open the memory segment
             throwError("Cannot open shared memory");
         }
@@ -128,7 +131,6 @@ private:
         if(shared_object_ == MAP_FAILED) {
             throwError("Cannot map shared memory");
         }
-
     }
 
     void throwError(std::string_view error) {
