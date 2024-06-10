@@ -7,9 +7,7 @@
 using namespace simpleshm;
 
 TEST_CASE("Shared Objects can be created and destroyed") {
-    auto shared_bool = std::make_unique<SharedObject<bool>>("test_simpleshm_bool");
-    CHECK_THROWS_AS (shared_bool->get(), std::bad_optional_access);
-    shared_bool->set(true);
+    auto shared_bool = std::make_unique<SharedObject<bool>>("test_simpleshm_bool", true);
     REQUIRE (shared_bool->get() == true);
     shared_bool->set(false);
     REQUIRE (shared_bool->get() == false);
@@ -21,7 +19,6 @@ TEST_CASE("Shared Objects can be created and destroyed") {
 TEST_CASE("Shared Objects can be accessed from a single thread") {
     auto shared_bool1 = std::make_unique<SharedObject<bool>>("test_simpleshm_bool_single_thread");
     auto shared_bool2 = std::make_unique<SharedObject<bool>>("test_simpleshm_bool_single_thread");
-    CHECK_THROWS_AS (shared_bool2->get(), std::bad_optional_access);
     shared_bool1->set(true);
     auto shared_bool3 = std::make_unique<SharedObject<bool>>("test_simpleshm_bool_single_thread");
     REQUIRE (shared_bool1->get() == true);
@@ -40,8 +37,7 @@ TEST_CASE("Shared Objects can be accessed from a single thread") {
 }
 
 TEST_CASE("Shared Objects can be accessed from multiple threads") {
-    auto shared_bool1 = std::make_unique<SharedObject<bool>>("test_simpleshm_bool_multi_thread");
-    shared_bool1->set(true);
+    auto shared_bool1 = std::make_unique<SharedObject<bool>>("test_simpleshm_bool_multi_thread", true);
     bool result = false;
     auto t = std::thread{[&](){
         auto shared_bool2 = SharedObject<bool>("test_simpleshm_bool_multi_thread");
@@ -57,8 +53,7 @@ TEST_CASE("Shared Objects can be accessed from multiple threads") {
 }
 
 TEST_CASE ("Access of shared objects is thread-safe") {
-    SharedObject<int> shared_int{"simpleshm_pthread_process_shared"};
-    shared_int.set(0);
+    SharedObject<int> shared_int{"simpleshm_pthread_process_shared", 0};
     const int n = 1'000'000;
     auto fun = [](){
         SharedObject<int> shared_int2{"simpleshm_pthread_process_shared"};

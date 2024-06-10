@@ -21,9 +21,9 @@ namespace simpleshm
 namespace internal
 {
 template <typename T>
-struct OptionalSharedObject
+struct SharedObject
 {
-    std::optional<T> data;
+    T data;
     std::recursive_mutex mutex;
 };
 
@@ -32,12 +32,14 @@ struct OptionalSharedObject
 template <typename T>
 class SharedObject
 {
-    static inline constexpr std::size_t SIZE = sizeof(internal::OptionalSharedObject<T>);
+    static inline constexpr std::size_t SIZE = sizeof(internal::SharedObject<T>);
 public:
-    SharedObject(std::string_view id)
+    template <typename ... Arg>
+    SharedObject(std::string_view id, Arg&&... arg)
     : id_{id}
     {
-        owner_ = openAsOwner();
+        static_assert(sizeof...(Arg) == 0 || std::is_constructible_v<T, Arg&&...>);
+        owner_ = openAsOwner(std::forward<Arg&&>(arg)...);
         if(!owner_) {
             openAsNonOwner();
         } 
@@ -56,13 +58,12 @@ public:
 
     void set(const T& value) {
         auto lock = std::lock_guard{shared_object_->mutex};
-        shared_object_->data.emplace(value);
+        shared_object_->data = value;
     }
 
-    // throws std::bad_optional_access if value has never been set
     T get() const {
         auto lock = std::lock_guard{shared_object_->mutex};
-        return shared_object_->data.value();
+        return shared_object_->data;
     }
 
     std::recursive_mutex& mutex() {
@@ -74,9 +75,14 @@ private:
     std::string id_;
     int shm_file_descriptor_;
     sem_t* semaphore_;
-    internal::OptionalSharedObject<T>* shared_object_;
+    internal::SharedObject<T>* shared_object_;
 
-    bool openAsOwner() {
+    template <typename ... Arg>
+    bool openAsOwner(Arg&&... arg) {
+        if(!std::is_constructible_v<T, Arg&&...>) {
+            return false;
+        }
+
         semaphore_ = sem_open(id_.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR, 0);
         if(semaphore_ == SEM_FAILED) {
             return false;
@@ -97,7 +103,7 @@ private:
             throwError("Cannot resize shared memory");
         }
 
-        shared_object_ = reinterpret_cast<internal::OptionalSharedObject<T>*>(
+        shared_object_ = reinterpret_cast<internal::SharedObject<T>*>(
             mmap(nullptr, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_file_descriptor_, 0));
         if(shared_object_ == MAP_FAILED) {
             shm_unlink(id_.c_str());
@@ -106,7 +112,7 @@ private:
             throwError("Cannot map shared memory");
         }
 
-        new (shared_object_) internal::OptionalSharedObject<T>();
+        new (shared_object_) internal::SharedObject<T>({{std::forward<Arg&&>(arg)...},{}});
 
         // this is potentially dangerous, but it seems to work:
         // std::mutex cannot be used between processes by default
@@ -143,7 +149,7 @@ private:
             throwError("Cannot open shared memory");
         }
 
-        shared_object_ = reinterpret_cast<internal::OptionalSharedObject<T>*>(
+        shared_object_ = reinterpret_cast<internal::SharedObject<T>*>(
             mmap(nullptr, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_file_descriptor_, 0));
         if(shared_object_ == MAP_FAILED) {
             throwError("Cannot map shared memory");
