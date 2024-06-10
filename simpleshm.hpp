@@ -41,7 +41,6 @@ public:
     : id_{id}
     {
         static_assert(sizeof...(Arg) == 0 || std::is_constructible_v<T, Arg&&...>);
-        // we try creating it - if it already exists, we try opening it
         bool new_object_created = create(std::forward<Arg&&>(arg)...);
         if(!new_object_created) {
             open();
@@ -54,8 +53,8 @@ public:
         munmap(shared_object_, SIZE);
         close(shm_file_descriptor_);
         if(no_more_references) {
-            shm_unlink(id_.data());
-            sem_unlink(id_.data());
+            shm_unlink(id_.c_str());
+            sem_unlink(id_.c_str());
         }
         else {
             sem_post(semaphore_);
@@ -77,10 +76,9 @@ public:
     }
 
 private:
-    bool owner_;
     std::string id_;
-    int shm_file_descriptor_;
     sem_t* semaphore_;
+    int shm_file_descriptor_;
     internal::SharedObject<T>* shared_object_;
 
     template <typename ... Arg>
@@ -94,9 +92,8 @@ private:
             return false;
         }
 
-         // try creating shared memory segment
         shm_file_descriptor_ = shm_open(id_.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
-        if(shm_file_descriptor_ < 0) { // we could not create the memory segment
+        if(shm_file_descriptor_ < 0) {
             sem_unlink(id_.c_str());
             sem_post(semaphore_);
             throwError("Cannot create shared memory");
