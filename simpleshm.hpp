@@ -23,9 +23,10 @@ namespace internal
 template <typename T>
 struct SharedObject
 {
-    T data;
     std::recursive_mutex mutex;
-    uint32_t reference_counter;
+    std::size_t reference_counter;
+    std::size_t data_size;
+    T data;
 };
 
 }
@@ -117,7 +118,7 @@ private:
             throwError("Cannot map shared memory");
         }
 
-        new (shared_object_) internal::SharedObject<T>({{std::forward<Arg&&>(arg)...},{}});
+        new (shared_object_) internal::SharedObject<T>({{},{1},{SIZE},{std::forward<Arg&&>(arg)...}});
 
         // this is potentially dangerous, but it seems to work:
         // std::mutex cannot be used between processes by default
@@ -128,8 +129,6 @@ private:
         pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
         pthread_mutex_destroy(shared_object_->mutex.native_handle());
         pthread_mutex_init(shared_object_->mutex.native_handle(), &attr);
-
-        shared_object_->reference_counter = 1;
 
         sem_post(semaphore_);
         return true;
@@ -160,6 +159,10 @@ private:
             mmap(nullptr, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_file_descriptor_, 0));
         if(shared_object_ == MAP_FAILED) {
             throwError("Cannot map shared memory");
+        }
+
+        if(shared_object_->data_size != SIZE) {
+            throwError("Data size mismatch");
         }
 
         shared_object_->reference_counter++;
