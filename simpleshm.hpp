@@ -118,7 +118,7 @@ private:
             throwError("Cannot map shared memory");
         }
 
-        new (shared_object_) internal::SharedObject<T>({{},{1},{SIZE},{std::forward<Arg&&>(arg)...}});
+        new (shared_object_) internal::SharedObject<T>({{},{1},{sizeof(T)},{std::forward<Arg&&>(arg)...}});
 
         // this is potentially dangerous, but it seems to work:
         // std::mutex cannot be used between processes by default
@@ -161,7 +161,7 @@ private:
             throwError("Cannot map shared memory");
         }
 
-        if(shared_object_->data_size != SIZE) {
+        if(shared_object_->data_size != sizeof(T)) {
             throwError("Data size mismatch");
         }
 
