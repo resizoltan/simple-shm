@@ -25,6 +25,7 @@ struct SharedObject
 {
     T data;
     std::recursive_mutex mutex;
+    uint32_t reference_counter;
 };
 
 }
@@ -39,20 +40,24 @@ public:
     : id_{id}
     {
         static_assert(sizeof...(Arg) == 0 || std::is_constructible_v<T, Arg&&...>);
-        owner_ = openAsOwner(std::forward<Arg&&>(arg)...);
-        if(!owner_) {
-            openAsNonOwner();
-        } 
+        // we try creating it - if it already exists, we try opening it
+        bool new_object_created = create(std::forward<Arg&&>(arg)...);
+        if(!new_object_created) {
+            open();
+        }
     }
 
     ~SharedObject() {
+        sem_wait(semaphore_);
+        bool no_more_references = --shared_object_->reference_counter == 0;
         munmap(shared_object_, SIZE);
         close(shm_file_descriptor_);
-        if(owner_) {
-            // we acquire the semaphore so we know that noone is currently initializing
-            sem_wait(semaphore_);
+        if(no_more_references) {
             shm_unlink(id_.data());
             sem_unlink(id_.data());
+        }
+        else {
+            sem_post(semaphore_);
         }
     }
 
@@ -78,7 +83,7 @@ private:
     internal::SharedObject<T>* shared_object_;
 
     template <typename ... Arg>
-    bool openAsOwner(Arg&&... arg) {
+    bool create(Arg&&... arg) {
         if(!std::is_constructible_v<T, Arg&&...>) {
             return false;
         }
@@ -124,28 +129,30 @@ private:
         pthread_mutex_destroy(shared_object_->mutex.native_handle());
         pthread_mutex_init(shared_object_->mutex.native_handle(), &attr);
 
+        shared_object_->reference_counter = 1;
+
         sem_post(semaphore_);
         return true;
     }
 
-    void openAsNonOwner() {
+    void open() {
         semaphore_ = sem_open(id_.c_str(), O_RDWR);
         if(semaphore_ == SEM_FAILED) {
-            throwError("Cannot create semaphore");
+            throwError("Cannot open semaphore");
         }
 
-        // we wait max 10 ms for the owner to finish initialization
+        // we wait max 10 ms for the creator to finish initialization
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
         ts.tv_nsec += 10'000'000;
         if(sem_timedwait(semaphore_, &ts)) {
-            throwError("Could not acquire semaphore");
+            // a timeout indicates that the shared object has been destroyed since opening the semaphore
+            throwError("Cannot acquire semaphore");
         }
-        // we block the semaphore so the owner cannot destruct while we are opening
+        
         shm_file_descriptor_ = shm_open(id_.c_str(), O_RDWR, S_IRUSR | S_IWUSR);
-        sem_post(semaphore_);
 
-        if(shm_file_descriptor_ < 0) { // we could not open the memory segment
+        if(shm_file_descriptor_ < 0) {
             throwError("Cannot open shared memory");
         }
 
@@ -154,6 +161,9 @@ private:
         if(shared_object_ == MAP_FAILED) {
             throwError("Cannot map shared memory");
         }
+
+        shared_object_->reference_counter++;
+        sem_post(semaphore_);
     }
 
     void throwError(std::string_view error) {
